@@ -1,0 +1,5 @@
+{
+  "name": "KML to GeoJSON AI Converter",
+  "description": "A professional tool to convert KML geospatial files to GeoJSON format using AI for robust parsing and structure mapping.",
+  "requestFramePermissions": []
+}
