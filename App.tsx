@@ -1,8 +1,9 @@
 
-import React, { useState, useCallback } from 'react';
+import React, { useState } from 'react';
 import { Layout } from './components/Layout';
 import { ConversionResult } from './types';
 import { convertKmlToGeoJson } from './services/geminiService';
+import JSZip from 'jszip';
 
 const App: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
@@ -19,36 +20,67 @@ const App: React.FC = () => {
     }
   };
 
+  const processKmlText = async (kmlText: string, originalName: string) => {
+    try {
+      const geoJson = await convertKmlToGeoJson(kmlText);
+      setResult({
+        geoJson,
+        fileName: originalName.replace(/\.(kml|kmz)$/i, '.json'),
+        status: 'success'
+      });
+    } catch (err: any) {
+      setResult(prev => ({ 
+        ...prev, 
+        status: 'error', 
+        errorMessage: err.message || 'An error occurred during conversion.' 
+      }));
+    }
+  };
+
   const handleConvert = async () => {
     if (!file) return;
 
     setResult(prev => ({ ...prev, status: 'loading', errorMessage: undefined }));
 
-    try {
-      const reader = new FileReader();
-      reader.onload = async (e) => {
-        const text = e.target?.result as string;
-        if (!text) {
-          setResult(prev => ({ ...prev, status: 'error', errorMessage: 'Could not read file.' }));
-          return;
-        }
+    const isKmz = file.name.toLowerCase().endsWith('.kmz');
 
-        try {
-          const geoJson = await convertKmlToGeoJson(text);
-          setResult({
-            geoJson,
-            fileName: file.name.replace('.kml', '.json'),
-            status: 'success'
-          });
-        } catch (err: any) {
-          setResult(prev => ({ 
-            ...prev, 
-            status: 'error', 
-            errorMessage: err.message || 'An error occurred during conversion.' 
-          }));
-        }
-      };
-      reader.readAsText(file);
+    try {
+      if (isKmz) {
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+          try {
+            const arrayBuffer = e.target?.result as ArrayBuffer;
+            const zip = await JSZip.loadAsync(arrayBuffer);
+            
+            // Look for the first KML file in the archive
+            // Added explicit type cast to 'any' for the find callback argument to resolve "Property 'name' does not exist on type 'unknown'"
+            const kmlFile = Object.values(zip.files).find((f: any) => f.name.toLowerCase().endsWith('.kml'));
+            
+            if (!kmlFile) {
+              setResult(prev => ({ ...prev, status: 'error', errorMessage: 'No KML file found inside the KMZ archive.' }));
+              return;
+            }
+
+            // Added explicit type cast to 'any' to resolve "Property 'async' does not exist on type 'unknown'"
+            const kmlText = await (kmlFile as any).async("string");
+            await processKmlText(kmlText, file.name);
+          } catch (err) {
+            setResult(prev => ({ ...prev, status: 'error', errorMessage: 'Failed to extract KMZ file.' }));
+          }
+        };
+        reader.readAsArrayBuffer(file);
+      } else {
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+          const text = e.target?.result as string;
+          if (!text) {
+            setResult(prev => ({ ...prev, status: 'error', errorMessage: 'Could not read file.' }));
+            return;
+          }
+          await processKmlText(text, file.name);
+        };
+        reader.readAsText(file);
+      }
     } catch (err) {
       setResult(prev => ({ ...prev, status: 'error', errorMessage: 'File processing failed.' }));
     }
@@ -83,11 +115,11 @@ const App: React.FC = () => {
         </div>
         
         <div className="space-y-1">
-          <label className="text-sm font-medium text-gray-500">Choose a KML file</label>
+          <label className="text-sm font-medium text-gray-500">Choose a KML or KMZ file</label>
           <div className="flex flex-col sm:flex-row gap-4">
             <input
               type="file"
-              accept=".kml"
+              accept=".kml,.kmz"
               onChange={handleFileChange}
               className="block w-full text-sm text-gray-500
                 file:mr-4 file:py-3 file:px-6
@@ -114,7 +146,7 @@ const App: React.FC = () => {
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
               </svg>
-              Converting...
+              {file?.name.toLowerCase().endsWith('.kmz') ? 'Extracting & Converting...' : 'Converting...'}
             </div>
           ) : 'Convert'}
         </button>
@@ -130,7 +162,7 @@ const App: React.FC = () => {
 
         {result.status === 'idle' && (
           <div className="bg-orange-50 text-orange-800 p-4 rounded-xl border border-orange-100 text-center">
-            First select a KML file and click convert
+            First select a file (.kml or .kmz) and click convert
           </div>
         )}
 
